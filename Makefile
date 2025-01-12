@@ -103,3 +103,4 @@ uninstall: uninstall-icon
 	@echo "REMOVE share/nsxiv/"
 	rm -rf $(DESTDIR)$(EGPREFIX)
 
+.PHONY: config.h
