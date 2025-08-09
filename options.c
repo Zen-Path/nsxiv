@@ -61,9 +61,7 @@ static void print_version(void)
 #if HAVE_LIBEXIF
 		"+exif "
 #endif
-#if HAVE_IMLIB2_MULTI_FRAME
 		"+multiframe "
-#endif
 		"\n", stdout);
 }
 
@@ -85,10 +83,10 @@ void parse_options(int argc, char **argv)
 		OPT_AL,
 		OPT_THUMB,
 		OPT_BAR,
-		OPT_BG,
+		OPT_CLASS,
 		OPT_CA,
 		OPT_CD,
-		OPT_CLASS
+		OPT_UC
 	};
 	static const struct optparse_long longopts[] = {
 		{ "framerate",      'A',     OPTPARSE_REQUIRED },
@@ -120,10 +118,9 @@ void parse_options(int argc, char **argv)
 		{ "null",           '0',     OPTPARSE_NONE },
 		{ "anti-alias",    OPT_AA,   OPTPARSE_OPTIONAL },
 		{ "alpha-layer",   OPT_AL,   OPTPARSE_OPTIONAL },
-		/* TODO: document this when it's stable */
-		{ "bg-cache",      OPT_BG,   OPTPARSE_OPTIONAL },
 		{ "cache-allow",   OPT_CA,   OPTPARSE_REQUIRED },
 		{ "cache-deny",    OPT_CD,   OPTPARSE_REQUIRED },
+		{ "update-cache",  OPT_UC,   OPTPARSE_NONE },
 		{ 0 }, /* end */
 	};
 
@@ -161,8 +158,8 @@ void parse_options(int argc, char **argv)
 	_options.quiet = false;
 	_options.thumb_mode = false;
 	_options.clean_cache = false;
+	_options.update_cache = false;
 	_options.private_mode = false;
-	_options.background_cache = false;
 
 	if (argc > 0) {
 		s = strrchr(argv[0], '/');
@@ -285,12 +282,12 @@ void parse_options(int argc, char **argv)
 		case OPT_THUMB:
 			_options.thumb_mode = parse_optional_no("thumbnail", op.optarg);
 			break;
-		case OPT_BG:
-			_options.background_cache = parse_optional_no("bg-cache", op.optarg);
-			break;
 		case OPT_CA: case OPT_CD:
 			_options.tns_filters = op.optarg;
 			_options.tns_filters_is_blacklist = (opt == OPT_CD);
+			break;
+		case OPT_UC:
+			_options.update_cache = true;
 			break;
 		}
 	}
