@@ -122,6 +122,12 @@ static bool xgetline(char **lineptr, size_t *n)
 	return len > 0;
 }
 
+static int zoom_to_percent(float zoom)
+{
+	float round = 0.5f;
+	return (int)(zoom * 100.0f + round);
+}
+
 static int fncmp(const void *a, const void *b)
 {
 	return strcoll(((fileinfo_t *)a)->name, ((fileinfo_t *)b)->name);
@@ -129,18 +135,8 @@ static int fncmp(const void *a, const void *b)
 
 static void check_add_file(const char *filename, bool given)
 {
-	char *path;
-
 	if (*filename == '\0')
 		return;
-
-	if (access(filename, R_OK) < 0 ||
-	    (path = realpath(filename, NULL)) == NULL)
-	{
-		if (given)
-			error(0, errno, "%s", filename);
-		return;
-	}
 
 	if (fileidx == filecnt) {
 		filecnt *= 2;
@@ -149,7 +145,7 @@ static void check_add_file(const char *filename, bool given)
 	}
 
 	files[fileidx].name = estrdup(filename);
-	files[fileidx].path = path;
+	files[fileidx].path = NULL;
 	if (given)
 		files[fileidx].flags |= FF_WARN;
 	fileidx++;
@@ -161,6 +157,11 @@ static void add_entry(const char *entry_name)
 	char *filename;
 	struct stat fstats;
 	r_dir_t dir;
+
+	if (options->assume_files) {
+		check_add_file(entry_name, true);
+		return;
+	}
 
 	if (stat(entry_name, &fstats) < 0) {
 		error(0, errno, "%s", entry_name);
@@ -174,7 +175,7 @@ static void add_entry(const char *entry_name)
 			return;
 		}
 		start = fileidx;
-		while ((filename = r_readdir(&dir, true)) != NULL) {
+		while ((filename = r_readdir(&dir, options->include_hidden)) != NULL) {
 			check_add_file(filename, false);
 			free(filename);
 		}
@@ -197,8 +198,7 @@ void remove_file(int n, bool manual)
 	if (files[n].flags & FF_MARK)
 		markcnt--;
 
-	if (files[n].path != files[n].name)
-		free((void *)files[n].path);
+	free((void *)files[n].path);
 	free((void *)files[n].name);
 	if (tns.thumbs != NULL)
 		tns_unload(&tns, n);
@@ -321,19 +321,20 @@ static void open_title(void)
 {
 	char *argv[8];
 	char w[12] = "", h[12] = "", z[12] = "", fidx[12], fcnt[12];
+	const char *filepath;
 
-	if (wintitle.f.err)
+	if (wintitle.f.err || (filepath = file_realpath(&files[fileidx], 0)) == NULL)
 		return;
 
 	close_title();
 	if (mode == MODE_IMAGE) {
 		snprintf(w, ARRLEN(w), "%d", img.w);
 		snprintf(h, ARRLEN(h), "%d", img.h);
-		snprintf(z, ARRLEN(z), "%d", (int)(img.zoom * 100));
+		snprintf(z, ARRLEN(z), "%d", zoom_to_percent(img.zoom));
 	}
 	snprintf(fidx, ARRLEN(fidx), "%d", fileidx + 1);
 	snprintf(fcnt, ARRLEN(fcnt), "%d", filecnt);
-	construct_argv(argv, ARRLEN(argv), wintitle.f.cmd, files[fileidx].path,
+	construct_argv(argv, ARRLEN(argv), wintitle.f.cmd, filepath,
 	               fidx, fcnt, w, h, z, NULL);
 	wintitle.pid = spawn(&wintitle.fd, NULL, O_NONBLOCK, argv);
 }
@@ -348,8 +349,9 @@ void open_info(void)
 	char *argv[6], w[12] = "", h[12] = "";
 	char *cmd = mode == MODE_IMAGE ? info.f.cmd : info.ft.cmd;
 	bool ferr = mode == MODE_IMAGE ? info.f.err : info.ft.err;
+	const char *filepath = file_realpath(&files[fileidx], 0);
 
-	if (ferr || info.fd >= 0 || win.bar.h == 0)
+	if (ferr || info.fd >= 0 || win.bar.h == 0 || filepath == NULL)
 		return;
 	win.bar.l.buf[0] = '\0';
 	if (mode == MODE_IMAGE) {
@@ -357,7 +359,7 @@ void open_info(void)
 		snprintf(h, sizeof(h), "%d", img.h);
 	}
 	construct_argv(argv, ARRLEN(argv), cmd, files[fileidx].name, w, h,
-	               files[fileidx].path, NULL);
+	               filepath, NULL);
 	info.pid = spawn(&info.fd, NULL, O_NONBLOCK, argv);
 }
 
@@ -405,7 +407,7 @@ void load_image(int new)
 	files[new].flags &= ~FF_WARN;
 	fileidx = current = new;
 
-	arl_add(&arl, files[fileidx].path);
+	arl_add(&arl, &files[fileidx]);
 
 	if (img.multi.cnt > 0 && img.multi.animate)
 		set_timeout(animate, img.multi.frames[img.multi.sel].delay, true);
@@ -442,6 +444,7 @@ static void update_info(void)
 	unsigned int i, fn, fw;
 	const char *mark;
 	win_bar_t *l = &win.bar.l, *r = &win.bar.r;
+	const char *filepath, *cmp_path;
 
 	static struct {
 		const char *filepath;
@@ -450,8 +453,11 @@ static void update_info(void)
 		appmode_t mode;
 	} prev;
 
+	filepath = file_realpath(&files[fileidx], 0);
+	cmp_path = filepath != NULL ? filepath : files[fileidx].name;
+
 	if (prev.fileidx != fileidx || prev.mode != mode ||
-	    (prev.filepath == NULL || !STREQ(prev.filepath, files[fileidx].path)))
+	    (prev.filepath == NULL || !STREQ(prev.filepath, cmp_path)))
 	{
 		close_info();
 		open_info();
@@ -464,7 +470,7 @@ static void update_info(void)
 		return;
 
 	free((char *)prev.filepath);
-	prev.filepath = estrdup(files[fileidx].path);
+	prev.filepath = estrdup(cmp_path);
 	prev.fileidx = fileidx;
 	prev.zoom = img.zoom;
 	prev.mode = mode;
@@ -496,7 +502,7 @@ static void update_info(void)
 			bar_put(r, "B%+d" BAR_SEP, img.brightness);
 		if (img.contrast)
 			bar_put(r, "C%+d" BAR_SEP, img.contrast);
-		bar_put(r, "%3d%%" BAR_SEP, (int)(img.zoom * 100.0));
+		bar_put(r, "%3d%%" BAR_SEP, zoom_to_percent(img.zoom));
 		if (img.multi.cnt > 0) {
 			for (fn = 0, i = img.multi.cnt; i > 0; fn++, i /= 10)
 				;
@@ -658,7 +664,11 @@ static bool run_key_handler(const char *key, unsigned int mask)
 	oldst = emalloc(fcnt * sizeof(*oldst));
 	for (f = i = 0; f < fcnt; i++) {
 		if ((marked && (files[i].flags & FF_MARK)) || (!marked && i == fileidx)) {
-			stat(files[i].path, &oldst[f]);
+			const char *filepath = file_realpath(&files[i], 0);
+			if (filepath == NULL)
+				filepath = files[i].name;
+			if (stat(filepath, &oldst[f]) != 0)
+				memset(&oldst[f], 0, sizeof(oldst[f]));
 			fprintf(pfs, "%s%c", files[i].name, options->using_null ? '\0' : '\n');
 			f++;
 		}
@@ -669,13 +679,17 @@ static bool run_key_handler(const char *key, unsigned int mask)
 
 	for (f = i = 0; f < fcnt; i++) {
 		if ((marked && (files[i].flags & FF_MARK)) || (!marked && i == fileidx)) {
-			if (stat(files[i].path, &st) != 0 ||
+			const char *filepath = file_realpath(&files[i], 1);
+			if (filepath == NULL)
+				filepath = files[i].name;
+			if ((files[i].flags & FF_TN_NEEDS_UPDATE) || stat(filepath, &st) != 0 ||
 			    memcmp(&oldst[f].st_mtime, &st.st_mtime, sizeof(st.st_mtime)) != 0)
 			{
 				if (tns.thumbs != NULL) {
 					tns_unload(&tns, i);
 					tns.loadnext = MIN(tns.loadnext, i);
 				}
+				files[i].flags &= ~FF_TN_NEEDS_UPDATE;
 				changed = true;
 			}
 			f++;

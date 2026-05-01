@@ -101,14 +101,18 @@ typedef enum {
 typedef enum {
 	FF_WARN    = 1,
 	FF_MARK    = 2,
-	FF_TN_INIT = 4
+	FF_TN_INIT = 4,
+	FF_SYMLINK = 8,
+	FF_TN_NEEDS_UPDATE = 16
 } fileflags_t;
 
 typedef struct {
 	const char *name; /* as given by user */
-	const char *path; /* always absolute, result of realpath(3) */
+	const char *path; /* lazily resolved absolute path, generally should be accessed via file_realpath() */
 	fileflags_t flags;
 } fileinfo_t;
+
+const char *file_realpath(const fileinfo_t*, bool);
 
 /* timeouts in milliseconds: */
 enum {
@@ -134,12 +138,15 @@ struct arl {
 	int fd;
 	int wd_dir;
 	int wd_file;
-	const char *filename;
+	int wd_link;
+	int wd_link_dir;
+	char *filename;
+	char *linkname;
 };
 
 void arl_init(arl_t*);
 void arl_cleanup(arl_t*);
-void arl_add(arl_t*, const char* /* result of realpath(3) */);
+void arl_add(arl_t*, const fileinfo_t *);
 bool arl_handle(arl_t*);
 
 
@@ -245,8 +252,10 @@ struct opt {
 	bool to_stdout;
 	bool using_null;
 	bool recursive;
+	bool include_hidden;
 	int filecnt;
 	int startnum;
+	bool assume_files;
 
 	/* image: */
 	scalemode_t scalemode;
@@ -358,6 +367,7 @@ void* emalloc(size_t);
 void* ecalloc(size_t, size_t);
 void* erealloc(void*, size_t);
 char* estrdup(const char*);
+char* estrndup(const char*, size_t);
 void error(int, int, const char*, ...);
 int r_opendir(r_dir_t*, const char*, bool);
 int r_closedir(r_dir_t*);

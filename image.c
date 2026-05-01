@@ -96,6 +96,7 @@ void exif_auto_orientate(const fileinfo_t *file)
 	ExifEntry *entry;
 	int byte_order, orientation = 0;
 
+	assert(file->path != NULL);
 	if ((ed = exif_data_new_from_file(file->path)) == NULL)
 		return;
 	byte_order = exif_data_get_byte_order(ed);
@@ -178,6 +179,7 @@ static bool img_load_multiframe(img_t *img, const fileinfo_t *file)
 	 */
 	pflag = m->length = m->cnt = m->sel = 0;
 	px = py = pw = ph = 0;
+
 	for (n = 1; n <= fcnt; ++n) {
 		Imlib_Image frame, canvas;
 		int sx, sy, sw, sh;
@@ -185,6 +187,7 @@ static bool img_load_multiframe(img_t *img, const fileinfo_t *file)
 
 		imlib_context_set_image(m->cnt < 1 ? blank : m->frames[m->cnt - 1].im);
 		canvas = imlib_clone_image();
+		assert(file->path != NULL);
 		if ((frame = imlib_load_image_frame(file->path, n)) != NULL) {
 			imlib_context_set_image(frame);
 			imlib_image_set_changes_on_disk(); /* see img_load() for rationale */
@@ -255,22 +258,26 @@ Imlib_Image img_open(const fileinfo_t *file)
 {
 	struct stat st;
 	Imlib_Image im = NULL;
+	const char *path, *errmsg;
 
-	if (access(file->path, R_OK) == 0 &&
-	    stat(file->path, &st) == 0 && S_ISREG(st.st_mode) &&
-	    (im = imlib_load_image_frame(file->path, 1)) != NULL)
-	{
-		imlib_context_set_image(im);
-	}
-	if (im == NULL && (file->flags & FF_WARN)) {
-		int e = imlib_get_error();
-		const char *errmsg = imlib_strerror(e);
+	if ((path = file_realpath(file, 1)) == NULL)
+		return NULL;
+
+	if (access(path, R_OK) < 0 || stat(path, &st) < 0) {
+		errmsg = strerror(errno);
+	} else if (!S_ISREG(st.st_mode)) {
+		errmsg = "Not a regular file";
+	} else if ((im = imlib_load_image_frame(path, 1)) == NULL) {
 		const char skip_prefix[] = "Imlib2: ";
-
+		int e = imlib_get_error();
+		errmsg = imlib_strerror(e);
 		if (strncmp(errmsg, skip_prefix, sizeof(skip_prefix) - 1) == 0)
 			errmsg += sizeof(skip_prefix) - 1;
-		error(0, 0, "%s: Error opening image: %s", file->name, errmsg);
+	} else {
+		imlib_context_set_image(im);
 	}
+	if (im == NULL && (file->flags & FF_WARN))
+		error(0, 0, "%s: Error opening image: %s", file->name, errmsg);
 	return im;
 }
 
@@ -325,21 +332,26 @@ CLEANUP void img_close(img_t *img, bool decache)
 	unsigned int i;
 
 	if (img->multi.cnt > 0) {
+		const char *curpath = NULL;
 		for (i = 0; i < img->multi.cnt; i++)
 			img_free(img->multi.frames[i].im, decache);
 		/* NOTE: the above only decaches the "composed frames",
 		 * and not the "raw frame" that's associated with the file.
 		 * which leads to issues like: https://codeberg.org/nsxiv/nsxiv/issues/456
 		 */
+		if (decache) {
+			curpath = files[fileidx].path;
+			assert(curpath != NULL);
+		}
 	#if IMLIB2_VERSION >= IMLIB2_VERSION_(1, 12, 0)
 		if (decache)
-			imlib_image_decache_file(files[fileidx].path);
+			imlib_image_decache_file(curpath);
 	#else /* UPGRADE: Imlib2 v1.12.0: remove this hack */
 		/* HACK: try to reload all the frames and forcefully decache them
 		 * if imlib_image_decache_file() isn't available.
 		 */
 		for (i = 0; decache && i < img->multi.cnt; i++)
-			img_free(imlib_load_image_frame(files[fileidx].path, i + 1), true);
+			img_free(imlib_load_image_frame(curpath, i + 1), true);
 	#endif
 		img->multi.cnt = 0;
 		img->im = NULL;

@@ -3,7 +3,7 @@
 nsxiv \- Neo Simple X Image Viewer
 .SH SYNOPSIS
 .B nsxiv
-.RB [ \-abcfhiopqrtvZ0 ]
+.RB [ \-abcfHhiopqrtvZ0 ]
 .RB [ \-A
 .IR FRAMERATE ]
 .RB [ \-e
@@ -70,6 +70,10 @@ Set image gamma to GAMMA (\-32..32).
 Set window position and size. See section GEOMETRY SPECIFICATIONS of X(7) for
 more information on GEOMETRY argument.
 .TP
+.BR "\-H, \-\-hidden" [=no]
+Include hidden files and directories.
+The long option accepts an optional "no" to disable it.
+.TP
 .B "\-h, \-\-help"
 Print brief usage information to standard output and exit.
 .TP
@@ -134,6 +138,11 @@ as an argument, disables it instead.
 Enables checkerboard background for alpha layer, when given
 .I no
 as an argument, disables it instead.
+.TP
+.B "\-\-assume\-files"
+Skip directory traversal, intended to be used when the list is known to contain
+only files. This avoids some initial disk operations and may reduce startup
+time on slow disks.
 .TP
 .BI "\-\-cache\-allow, \-\-cache\-deny " "CACHE\-PATHS"
 List of directories to whitelist or blacklist for thumbnail caching.

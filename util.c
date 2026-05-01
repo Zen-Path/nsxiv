@@ -22,6 +22,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <spawn.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -67,6 +68,14 @@ char *estrdup(const char *s)
 	return memcpy(emalloc(n), s, n);
 }
 
+char *estrndup(const char *s, size_t n)
+{
+	char *ptr = strndup(s, n);
+	if (ptr == NULL)
+		error(EXIT_FAILURE, errno, NULL);
+	return ptr;
+}
+
 void error(int eval, int err, const char *fmt, ...)
 {
 	va_list ap;
@@ -86,6 +95,43 @@ void error(int eval, int err, const char *fmt, ...)
 
 	if (eval != 0)
 		exit(eval);
+}
+
+const char *file_realpath(const fileinfo_t *file, bool invalidate_symlinks)
+{
+	bool use_cached, need_refresh = false;
+	fileinfo_t *mutable = (fileinfo_t *)file; /* avoids cast on caller's side */
+
+	assert(file != NULL);
+
+	use_cached = file->path != NULL && !invalidate_symlinks;
+	if (!use_cached) {
+		struct stat lst;
+		bool was_symlink = file->flags & FF_SYMLINK;
+		if (lstat(file->name, &lst) == 0 && S_ISLNK(lst.st_mode))
+			mutable->flags |= FF_SYMLINK;
+		else
+			mutable->flags &= ~FF_SYMLINK;
+		need_refresh = file->path == NULL ||
+		               (invalidate_symlinks && (was_symlink || (file->flags & FF_SYMLINK)));
+	}
+	if (need_refresh) {
+		char *newpath = realpath(file->name, NULL);
+		if (newpath == NULL) {
+			if (file->flags & FF_WARN)
+				error(0, errno, "%s", file->name);
+		}
+		if (newpath == NULL || file->path == NULL || !STREQ(newpath, file->path)) {
+			if (invalidate_symlinks && file->path != NULL) {
+				mutable->flags |= FF_TN_NEEDS_UPDATE;
+			}
+			free((void *)mutable->path);
+			mutable->path = newpath;
+		} else {
+			free(newpath);
+		}
+	}
+	return file->path;
 }
 
 int r_opendir(r_dir_t *rdir, const char *dirname, bool recursive)
@@ -134,7 +180,7 @@ int r_closedir(r_dir_t *rdir)
 	return ret;
 }
 
-char *r_readdir(r_dir_t *rdir, bool skip_dotfiles)
+char *r_readdir(r_dir_t *rdir, bool include_hidden)
 {
 	size_t len;
 	char *filename;
@@ -144,7 +190,7 @@ char *r_readdir(r_dir_t *rdir, bool skip_dotfiles)
 	while (true) {
 		if (rdir->dir != NULL && (dentry = readdir(rdir->dir)) != NULL) {
 			if (dentry->d_name[0] == '.') {
-				if (skip_dotfiles)
+				if (!include_hidden)
 					continue;
 				if (dentry->d_name[1] == '\0')
 					continue;
@@ -250,20 +296,28 @@ pid_t spawn(int *readfd, int *writefd, int pipeflags, char *const argv[])
 	const char *cmd;
 	int pfd_read[2] = {-1, -1}, pfd_write[2] = {-1, -1};
 	int err = 0;
-	bool fa_initialized = false;
+	bool fa_initialized = false, attr_initialized = false;
 	posix_spawn_file_actions_t fa;
+	sigset_t sigset;
+	posix_spawnattr_t attr;
 
 	assert(argv != NULL && argv[0] != NULL);
 	cmd = argv[0];
 
 	fa_initialized = !err && (err = posix_spawn_file_actions_init(&fa)) == 0;
+	if (!err && !(err = posix_spawnattr_init(&attr))) {
+		attr_initialized = true;
+		sigfillset(&sigset);
+		err = posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGDEF);
+		err = err ? err : posix_spawnattr_setsigdefault(&attr, &sigset);
+	}
 
 	if (!err && readfd != NULL)
 		err = mkspawn_pipe(&fa, cmd, pfd_read, 1, pipeflags);
 	if (!err && writefd != NULL)
 		err = mkspawn_pipe(&fa, cmd, pfd_write, 0, pipeflags);
 
-	err = err ? err : posix_spawnp(&pid, cmd, &fa, NULL, argv, environ);
+	err = err ? err : posix_spawnp(&pid, cmd, &fa, &attr, argv, environ);
 
 	if (pfd_read[0] >= 0) {
 		*readfd = err ? (close(pfd_read[0]), -1) : pfd_read[0];
@@ -273,6 +327,8 @@ pid_t spawn(int *readfd, int *writefd, int pipeflags, char *const argv[])
 		close(pfd_write[0]);
 		*writefd = err ? (close(pfd_write[1]), -1) : pfd_write[1];
 	}
+	if (attr_initialized)
+		posix_spawnattr_destroy(&attr);
 	if (fa_initialized)
 		posix_spawn_file_actions_destroy(&fa);
 

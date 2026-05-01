@@ -59,6 +59,20 @@ amount of edge cases wrong).
 [cf]: https://clang.llvm.org/docs/ClangFormat.html#git-integration
 
 
+AI Policy
+---------
+
+Using LLM ("AI") assistance is allowed within the following criteria:
+
+1. You must be capable of reviewing the changes yourself without any LLM
+   assistance, and personally perform that review before submitting a
+   non-draft pull request.
+2. Do NOT use LLMs to write commit message, issue/pull-request description or
+   comments. These are mediums for humans to communicate with other humans.
+
+Note: The first rule is more relaxed for the `nsxiv-extra` repo.
+
+
 Development workflow for maintainers
 ------------------------------------
 
@@ -79,9 +93,6 @@ Our workflow regarding pull requests is the following:
 
 For releases, the process is the following:
 
-  * Tag the release with a "vN" tag, where N is the version number. Also set
-    the commit message and tag description for the release commit to "Release
-    version N". Make sure to use an annotated tag.
   * Update `VERSION` macro in `config.mk`.
   * Update the changelog (`etc/CHANGELOG.md`):
     * Include link to the release tarball and add the release date.
@@ -91,6 +102,11 @@ For releases, the process is the following:
       release, the "Added" section for new features, and the "Fixes" section
       for fixed bugs or regressions.
     * Include pull request IDs with reference style links.
+  * Tag the release with a "vN" tag, where N is the version number. Also set
+    the commit message and tag description for the release commit to "Release
+    version N".
+  * Make sure to use an annotated tag (`-a`).
+  * Remember to push the tag to the remote as well (`git push --tags`).
 
 Mirroring to GitHub:
 
